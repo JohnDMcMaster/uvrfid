@@ -1,5 +1,5 @@
 UVNet RFID utilities (uvrfid)
 Copyright (C) 2011 John McMaster
 Various utilities to mess with RFID tags
-In particular, I have a TRF7960EVM that I'm using to mess with 1443A tags
+In particular, I have a TRF7960EVM that I'm using to mess with 14443A tags
 
