@@ -30,6 +30,103 @@ class RFID:
 	def __init__(self):
 		self.f = open(self.device, "w+")
 	
+	'''
+	0x10
+	register write (adress:data, adress:data
+	'''
+
+	'''
+	0x11
+	continous write (adress:data, data, ...)
+	'''
+
+	'''
+	0x12
+	register read (adress:data, adress:data, ...)
+	'''
+
+	'''
+	0x13
+	continous read (adress:data, data, ...)
+	'''
+
+	'''
+	0x14
+	ISO 15693 Inventory request
+	'''
+
+	'''
+	0x15
+	direct command
+	'''
+
+	'''
+	0x16
+	RAW mode
+	'''
+
+	'''
+	0x18
+	request code/mode
+	'''
+
+	'''
+	0x19
+	testing 14443A - sending and recieving
+	change bit rate
+	'''
+
+	'''
+	0x34
+	Ti SID poll
+	'''
+
+	'''
+	0x0F
+	Direct mode
+	'''
+
+	'''
+	0xB0
+	REQB
+	14443B REQB
+	'''
+
+	'''
+	0xB1
+	WUPB
+	'''
+
+	'''
+	0xA0 - REQA
+	0xA1
+	'''
+
+	'''
+	0xA2
+	14443A Select
+	'''
+
+	'''
+	0x03
+	enable or disable the reader chip
+	'''
+
+	'''
+	0xF0
+	AGC toggle
+	'''
+
+	'''
+	0xF1
+	AM PM toggle
+	'''
+
+	'''
+	0xF2
+	Full - half power selection (FF - full power)
+	'''
+
 	def get_version(self):
 		'''
 		phello = "Firmware Version 3.2.EXP.NOBB \r\n";
@@ -39,7 +136,19 @@ class RFID:
 		
 		Also it echos back, so we need to discard the echo (or verify...)
 		'''
-		self.f.write('01FEFEFEFEFE\r\n')
+		self.f.write('0100000000FE\r\n')
+		self.f.flush()
+		echoed = self.f.readline()
+		ret = self.f.readline()
+		ret = ret.strip()
+		
+		return ret
+
+	def get_info(self):
+		'''
+		phello = "TRF7960 EVM \r\n";
+		'''
+		self.f.write('0100000000FF\r\n')
 		self.f.flush()
 		echoed = self.f.readline()
 		ret = self.f.readline()
@@ -90,6 +199,7 @@ if __name__ == "__main__":
 
 	rfid = RFID()
 	print 'version: %s' % rfid.get_version()
+	print 'info: %s' % rfid.get_info()
 	
 	print 'Done!'
 
