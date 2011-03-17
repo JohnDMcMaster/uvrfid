@@ -11,6 +11,11 @@ Someone doesn't know how to spell "length" apparantly
 	99
 '''
 
+'''
+The mystical flags variable
+
+'''
+
 import sys 
 import os.path
 import select
@@ -21,7 +26,7 @@ VERSION = '0.1'
 def to_hex(s):
 	ret = ''
 	for x in s:
-		ret += '%02X' % x 	
+		ret += '%02X' % ord(x) 	
 	return ret
 
 def from_hex_char(c):
@@ -114,10 +119,12 @@ class RFID:
 		pbuf = &buf[4];
 			01 byte wasn't stored
 
-		[0]: magic byte (01)
+		[-1]: magic byte (01)
 			helps to re-sync protocol
-		[1]: arg0 (always data length?)
-		[2]: arg1
+			Index skipped in all other descriptions since its skipped in code
+		[0]: arg0 (always data length?)
+		[1]: arg1
+		[2]: arg2
 		[3]: arg2
 		[4]: command
 		[5...]: data (optional)
@@ -132,6 +139,7 @@ class RFID:
 				raise Exception('requires hex string') 
 		
 		to_write = '01%s\r\n' % s
+		print 'to board: %s' % to_write.strip()
 		self.f.write(to_write)
 		self.f.flush()
 		# Eat the response
@@ -155,8 +163,8 @@ class RFID:
 		
 		command_string = ''
 		command_string += to_hex(args)
-		command_string += filler_hex() * (3 - len(args))
-		# [3]: command
+		command_string += filler_hex() * (4 - len(args))
+		# [4]: command
 		command_string += to_hex(command)
 		command_string += to_hex(payload)
 
@@ -303,7 +311,7 @@ class RFID:
 		# one bytes per register + magic
 		self.send_parts(ord(len(targets) + 8), '\x12', data)
 		# "Register read request.\r\n"
-		self.f.readline().strip()
+		print self.f.readline().strip()
 		return self.read_response_bytes()
 
 	def reg_read_continuous(self, base_address, count):
@@ -322,15 +330,17 @@ class RFID:
 		data += '%c' % count
 		self.send_parts('', '\x13', data)
 		# ""Continous read request\r\n""
-		self.f.readline().strip()
+		print self.f.readline().strip()
 		return self.read_response_bytes()
 
-	'''
-	0x14
-	ISO 15693 Inventory request
-	'''
-	def inventory(self):
-		raise Exception('not implemented')
+	def inventory(self, flags):
+		'''
+		0x14
+		ISO 15693 Inventory request
+		'''
+		self.send_parts('', '\x14', chr(flags))
+		# "ISO 15693 Inventory request.\r\n"
+		print self.f.readline().strip()
 
 	def write_raw(self, byte):
 		'''Raw SPI/parallel line write (single byte as str)'''
@@ -357,7 +367,7 @@ class RFID:
 		'''
 		
 		# length + magic (no register)
-		self.send_parts_raw(ord(len(bytes) + 8), '\x16', bytes)
+		self.send_parts(ord(len(bytes) + 8), '\x16', bytes)
 		# "RAW mode.\r\n"
 		return self.f.readline().strip()
 
@@ -373,7 +383,7 @@ class RFID:
 		'''
 		
 		# length + magic (no register)
-		self.send_parts_raw(ord(len(bytes) + 8), '\x18', bytes)
+		self.send_parts(ord(len(bytes) + 8), '\x18', bytes)
 		# "Request mode.\r\n"
 		return self.f.readline().strip()
 
@@ -389,7 +399,7 @@ class RFID:
 		'''
 		
 		# length + magic (why 9 on this one?)
-		self.send_parts_raw(ord(len(bytes) + 9), '\x19', bit_rate)
+		self.send_parts(ord(len(bytes) + 9), '\x19', bit_rate)
 		# "14443A Request - change bit rate.\r\n"
 		return self.f.readline().strip()
 
@@ -404,9 +414,9 @@ class RFID:
 		'''
 		
 		# length + magic
-		self.send_parts_raw(ord(len(bytes) + 9), '\x34', flags)
+		self.send_parts(ord(len(bytes) + 9), '\x34', flags)
 		# "Ti SID Poll.\r\n"
-		self.f.readline().strip()
+		print self.f.readline().strip()
 		# At least sometimes returns something
 		return self.read_response_bytes()
 
@@ -420,7 +430,7 @@ class RFID:
 		# length + magic
 		self.send_simple_hex('\x0F')
 		# "Direct mode.\r\n"
-		self.f.readline().strip()
+		print self.f.readline().strip()
 
 	def REQB(self, slots):
 		'''Request A?'''
@@ -436,7 +446,7 @@ class RFID:
 		# length + magic
 		self.send_parts('', '\xB0', slots)
 		# "14443B REQB.\r\n"
-		self.f.readline().strip()
+		print self.f.readline().strip()
 
 	def WUPB(self, slots):
 		'''Wakeup B?'''
@@ -452,7 +462,7 @@ class RFID:
 		# length + magic
 		self.send_parts('', '\xB1', slots)
 		# "14443B REQB.\r\n"
-		self.f.readline().strip()
+		print self.f.readline().strip()
 
 	def REQA(self, REQA_arg):
 		'''Request A?'''
@@ -467,7 +477,7 @@ class RFID:
 		# length + magic
 		self.send_parts('', '\xA0', REQA_arg)
 		# "14443A REQA.\r\n"
-		self.f.readline().strip()
+		print self.f.readline().strip()
 
 	def WUPB(self, WUPB_arg):
 		'''Wakeup B?'''
@@ -482,7 +492,7 @@ class RFID:
 		# length + magic
 		self.send_parts('', '\xA1', WUPB_arg)
 		# "14443A REQA.\r\n"
-		self.f.readline().strip()
+		print self.f.readline().strip()
 
 	def disable_reader(self):
 		# commented out for some reason in firmware source code
@@ -640,6 +650,10 @@ if __name__ == "__main__":
 	rfid = RFID()
 	print 'version: %s' % rfid.get_version()
 	print 'info: %s' % rfid.get_info()
+
+	rfid.inventory(0xFF)
+	while True:
+		print rfid.f.readline().strip()
 	
 	print 'Done!'
 
