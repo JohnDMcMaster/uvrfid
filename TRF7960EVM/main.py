@@ -6,10 +6,15 @@ Copyright 2011 John McMaster <johnDMcMaster@gmail.com>
 Licensed under the terms of the LGPL V3 or later, see COPYING for details
 
 Think all responses are single line...will fixup after when I know for sure
+Someone doesn't know how to spell "length" apparantly
+	[mcmaster@gespenst sloc136_TRF7960_Firmware_Source_Code]$ fgrep -Hn 'lenght' *.c *.h |wc -l
+	99
 '''
 
 import sys 
 import os.path
+import select
+import serial
 
 VERSION = '0.1'
 
@@ -22,7 +27,7 @@ def to_hex(s):
 def from_hex_char(c):
 	if not len(c) is 1:
 		raise Exception('expected single char')
-	c = c.uppercase()
+	c = c.upper()
 	if c >= '0' and c <= '9':
 		return ord(c - '0')
 	elif c >= 'A' and c <= 'F':
@@ -54,6 +59,26 @@ All written bytes are echoed
 1 command byte
 Newline termination
 	\n
+
+Table 5-31
+bit: description
+7: command control bit
+	0: address
+	1: command
+6: R/W
+	R: 1
+	W: 0
+	Command: 0
+5: Continuous address mode
+	1: continuous
+	Command: 0
+4: Address / command bit 4
+3: Address / command bit 3
+2: Address / command bit 2
+1: Address / command bit 1
+0: Address / command bit 0
+
+When writing more than 12 bits to FIFO, continuous address mode should be 1
 '''
 class RFID:
 	device = "/dev/ttyUSB0"
@@ -61,10 +86,23 @@ class RFID:
 	f = None
 	
 	def __init__(self):
+		# set the termios, consider switching over to PySerial completly
+		#ser = serial.Serial(self.device, 115200, timeout=1)
+		#x = ser.read()          # read one byte
+		#s = ser.read(10)        # read up to ten bytes (timeout)
+		#line = ser.readline()   # read a '\n' terminated line
+		#ser.close()
+
 		self.f = open(self.device, "w+")
+		# Try to flush old garbage
+		#self.read_all()
 	
 	'''
 	Utility
+	'''
+	
+	'''
+	Code seems to indicate second byte should be 0x08 when not checked (size of 0)
 	'''
 	
 	def send(self, s):
@@ -87,7 +125,7 @@ class RFID:
 		Since first byte is inferred, all other seq notations will omit it
 		'''
 		
-		s = s.uppercase()
+		s = s.upper()
 		
 		for c in s:
 			if not (c >= 'A' and c <= 'F' or c >= '0' and c <= '9'):
@@ -102,11 +140,13 @@ class RFID:
 		# Mayhe should eat until its correct?
 		# need to figure out how to poll though or might freeze up
 		if to_write != echoed:
+			print 'to write: %s' % to_write
+			print 'echoed: %s' % echoed
 			raise Exception('did not echo correctly')
 	
 	def send_simple_hex(self, c):
 		'''Single command without any args'''
-		self.send_hex('00000000%s\r\n', c)
+		self.send_hex('08000000%s' % c)
 
 	def send_parts(self, args, command, payload):
 		'''all as bytes'''
@@ -122,6 +162,18 @@ class RFID:
 
 		return self.send_hex(command_string)
 
+	def send_parts_raw(self, args, payload):
+		'''all as bytes'''
+		if len(args) > 3:
+			raise Exception("too many args")
+		
+		command_string = ''
+		command_string += to_hex(args)
+		command_string += filler_hex() * (3 - len(args))
+		command_string += to_hex(payload)
+
+		return self.send_hex(command_string)
+
 	def read_response_bytes(self):
 		'''Parse response binary'''
 		'''
@@ -132,6 +184,16 @@ class RFID:
 			raise Exception("malformed response")
 		
 		line = line[1:-1]
+		
+	def read_all(self):
+		ret = ''
+		while True:
+			# Data ready?
+			(rlist, wlist, xlist) = select.select([self.f], None, None, 0)
+			if len(rlist) == 0:
+				break
+			ret += self.f.read()
+		return ret
 		
 	'''
 	Commands
@@ -169,7 +231,6 @@ class RFID:
 	 1D           TX length byte1                                R/W
 	 1E           TX length byte2                                R/W
 	 1F           FIFO I/O register                              R/W
-	
 	'''
 	def reg_write(self, address, byte):
 		'''Write to one and only one register, input as bytes'''
@@ -191,15 +252,15 @@ class RFID:
 		
 		for (address, byte) in targets:
 			# First byte is address
-			data += to_hex(address)
-			data += to_hex(byte)
+			data += ord(address)
+			data += ord(byte)
 		
 		# two bytes per register + magic
-		self.send_parts(len(data) + 8, '\x10', data)				
+		self.send_parts(ord(len(data) + 8), '\x10', data)
 		# "Register write request."
 		return self.f.readline().strip()
 
-	def reg_write_continuous(self, base_address, bytes)
+	def reg_write_continuous(self, base_address, bytes):
 		'''Write to a series of registers given base and incrementing, input as bytes'''
 		'''
 		0x11
@@ -212,17 +273,17 @@ class RFID:
 		[6...]: data
 		'''
 		data = ''
-		data += to_hex(base_address)
+		data += ord(base_address)
 		for byte in bytes:
-			data += to_hex(byte)
+			data += ord(byte)
 		# one byte + register + base + magic
-		self.send_parts(len(data) + 1 + 8, '\x11', data)				
+		self.send_parts(ord(len(data) + 1 + 8), '\x11', data)
 		# "Continous write request."
 		return self.f.readline().strip()
 		
-	def reg_read(self, address, byte):
+	def reg_read(self, address):
 		'''Read from one and only one register, input as bytes'''
-		return self.reg_read_single([address[)
+		return self.reg_read_single([address])
 
 	def reg_read_single(self, addresses):
 		'''Read from an array of registers, input as (address) as bytes'''
@@ -237,15 +298,15 @@ class RFID:
 		
 		for address in addresses:
 			# First byte is address
-			data += to_hex(address)
+			data += '%c' % address
 		
 		# one bytes per register + magic
-		self.send_parts(len(targets) + 8, '\x12', data)				
+		self.send_parts(ord(len(targets) + 8), '\x12', data)
 		# "Register read request.\r\n"
 		self.f.readline().strip()
 		return self.read_response_bytes()
 
-	def reg_read_continuous(self, base_address)
+	def reg_read_continuous(self, base_address, count):
 		'''Read from a series of registers given base and incrementing, input as bytes'''
 		'''
 		0x13
@@ -257,9 +318,9 @@ class RFID:
 		[5]: start register (masked 0x1f)
 		'''
 		data = ''
-		data += to_hex(base_address)
-		# one byte + register + base + magic
-		self.send_parts(len(data) + 1 + 8, '\x13', data)
+		data += '%c' % base_address
+		data += '%c' % count
+		self.send_parts('', '\x13', data)
 		# ""Continous read request\r\n""
 		self.f.readline().strip()
 		return self.read_response_bytes()
@@ -268,78 +329,254 @@ class RFID:
 	0x14
 	ISO 15693 Inventory request
 	'''
+	def inventory(self):
+		raise Exception('not implemented')
 
-	'''
-	0x15
-	direct command
-	'''
+	def write_raw(self, byte):
+		'''Raw SPI/parallel line write (single byte as str)'''
+		'''
+		0x15
+		direct command
+		
+		[5]: byte
+		'''
+		
+		# Length is inferred
+		self.send_parts('', '\x15', byte)
+		# "RAW mode.\r\n"
+		return self.f.readline().strip()
 
-	'''
-	0x16
-	RAW mode
-	'''
+	def write_raw(self, bytes):
+		'''Raw SPI/parallel line write (multi byte as str)'''
+		'''
+		0x16
+		RAW mode
+		
+		[0]: data size + 8
+		[5...]: data
+		'''
+		
+		# length + magic (no register)
+		self.send_parts_raw(ord(len(bytes) + 8), '\x16', bytes)
+		# "RAW mode.\r\n"
+		return self.f.readline().strip()
 
-	'''
-	0x18
-	request code/mode
-	'''
+	def request_mode(self, bytes):
+		'''?'''
+		'''
+		0x18
+		request code/mode
+		Semantics are somewhat complicated and lacking comments, not sure what this does
+		
+		[0]: data size + 8
+		[5...]: data
+		'''
+		
+		# length + magic (no register)
+		self.send_parts_raw(ord(len(bytes) + 8), '\x18', bytes)
+		# "Request mode.\r\n"
+		return self.f.readline().strip()
 
-	'''
-	0x19
-	testing 14443A - sending and recieving
-	change bit rate
-	'''
+	def change_bit_rate_core(self, bit_rate):
+		'''change bit rate'''
+		'''
+		0x19
+		testing 14443A - sending and recieving
+		change bit rate
+		
+		[0]: data size + 9
+		[5]: bit rate
+		'''
+		
+		# length + magic (why 9 on this one?)
+		self.send_parts_raw(ord(len(bytes) + 9), '\x19', bit_rate)
+		# "14443A Request - change bit rate.\r\n"
+		return self.f.readline().strip()
 
-	'''
-	0x34
-	Ti SID poll
-	'''
+	def TI_SID_poll(self, flags):
+		'''Poll the SID (TI)'''
+		'''
+		0x34
+		Ti SID poll
+		
+		[0]: data size + 8
+		[5]: flags
+		'''
+		
+		# length + magic
+		self.send_parts_raw(ord(len(bytes) + 9), '\x34', flags)
+		# "Ti SID Poll.\r\n"
+		self.f.readline().strip()
+		# At least sometimes returns something
+		return self.read_response_bytes()
 
-	'''
-	0x0F
-	Direct mode
-	'''
+	def set_direct_mode(self):
+		'''Put into direct mode'''
+		'''
+		0x0F
+		Direct mode		
+		'''
+		
+		# length + magic
+		self.send_simple_hex('\x0F')
+		# "Direct mode.\r\n"
+		self.f.readline().strip()
 
-	'''
-	0xB0
-	REQB
-	14443B REQB
-	'''
+	def REQB(self, slots):
+		'''Request A?'''
+		'''
+		0xB0
+		14443B REQB
+		Calls AnticollisionSequenceB(command, slots)
+		
+		[4]: command (0xB0)
+		[5]: slots
+		'''
+		
+		# length + magic
+		self.send_parts('', '\xB0', slots)
+		# "14443B REQB.\r\n"
+		self.f.readline().strip()
 
-	'''
-	0xB1
-	WUPB
-	'''
+	def WUPB(self, slots):
+		'''Wakeup B?'''
+		'''
+		0xB1
+		WUPB
+		Nearly identical to above
+		
+		[4]: command (0xB1)
+		[5]: slots
+		'''
+		
+		# length + magic
+		self.send_parts('', '\xB1', slots)
+		# "14443B REQB.\r\n"
+		self.f.readline().strip()
 
-	'''
-	0xA0 - REQA
-	0xA1
-	'''
+	def REQA(self, REQA_arg):
+		'''Request A?'''
+		'''
+		0xA0 - REQA
+		Calls AnticollisionSequenceA(REQA)
+		
+		[4]: command (0xA0)
+		[5]: REQA for 
+		'''
+		
+		# length + magic
+		self.send_parts('', '\xA0', REQA_arg)
+		# "14443A REQA.\r\n"
+		self.f.readline().strip()
 
-	'''
-	0xA2
-	14443A Select
-	'''
+	def WUPB(self, WUPB_arg):
+		'''Wakeup B?'''
+		'''
+		0xA1
+		Guessing this is WUPB
+		
+		[4]: command (0xA0)
+		[5]: REQA for 
+		'''
+		
+		# length + magic
+		self.send_parts('', '\xA1', WUPB_arg)
+		# "14443A REQA.\r\n"
+		self.f.readline().strip()
+
+	def disable_reader(self):
+		# commented out for some reason in firmware source code
+		# This could be re-implemented if desirable
+		raise Exception('unsupported by firmware')
+
+	def enable_reader(self):
+		return self.set_mode('\xFF')
+
+	def enable_reader(self):
+		return self.set_mode('\xFF')
+
+	def enable_reader(self):
+		return self.set_mode('\xFF')
+
+	def set_mode(self, mode):
+		'''
+		0xA2
+		14443A Select
+		'''
+		# length + magic
+		self.send_parts('', '\xA2', mode)
+		'''
+		One of (NOTE THE MISSING NEWLINE!):
+			"Reader disabled."
+			"External clock."
+			"Internal clock."
+		'''
+		# Since we get no newline, just consume all
+		self.read_all()
 
 	'''
 	0x03
 	enable or disable the reader chip
 	'''
 
-	'''
-	0xF0
-	AGC toggle
-	'''
+	def set_AGC(self, use_AGC = True):
+		'''Toggle automatic gain control (AGC)'''
+		'''
+		0xF0
+		AGC toggle
+		
+		[4]: command (0xF0)
+		[5]: 0xFF to turn on, turned off otherwise 
+		'''
+		
+		if use_AGC:
+			payload = '\x00'
+		else:
+			payload = '\xFF'
+		
+		# length + magic
+		self.send_parts('', '\xF0', payload)
+		# No response
 
-	'''
-	0xF1
-	AM PM toggle
-	'''
+	def set_modulation(self, use_PM):
+		'''Set modulation scheme'''
+		'''
+		0xF1
+		One of:
+			amplitude modulation (AM)
+			phase modulation (PM)
+		
+		[4]: command (0xF0)
+		[5]: 0xFF to turn on, turned off otherwise 
+		'''
+		
+		if use_PM:
+			payload = '\x00'
+		else:
+			payload = '\xFF'
+		
+		# length + magic
+		self.send_parts('', '\xF1', payload)
+		# No response
 
-	'''
-	0xF2
-	Full - half power selection (FF - full power)
-	'''
+	def set_full_power(self, use_FP = True):
+		'''Set power level'''
+		'''
+		0xF2
+		Full - half power selection (FF - full power)
+		
+		[4]: command (0xF0)
+		[5]: 0xFF to turn on, turned off otherwise 
+		'''
+		
+		if use_FP:
+			payload = '\xFF'
+		else:
+			payload = '\x00'
+		
+		# length + magic
+		self.send_parts('', '\xF2', payload)
+		# No response
 
 	def get_version(self):
 		'''
@@ -370,7 +607,6 @@ def arg_fatal(s):
 	print s
 	help()
 	sys.exit(1)
-
 
 if __name__ == "__main__":
 	image_file_names = list()
