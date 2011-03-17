@@ -260,13 +260,13 @@ class RFID:
 		
 		for (address, byte) in targets:
 			# First byte is address
-			data += ord(address)
-			data += ord(byte)
+			data += chr(address)
+			data += chr(byte)
 		
 		# two bytes per register + magic
-		self.send_parts(ord(len(data) + 8), '\x10', data)
+		self.send_parts(chr(len(data) + 8), '\x10', data)
 		# "Register write request."
-		return self.f.readline().strip()
+		print self.f.readline().strip()
 
 	def reg_write_continuous(self, base_address, bytes):
 		'''Write to a series of registers given base and incrementing, input as bytes'''
@@ -475,9 +475,10 @@ class RFID:
 		'''
 		
 		# length + magic
-		self.send_parts('', '\xA0', REQA_arg)
+		self.send_parts('', '\xA0', chr(REQA_arg))
 		# "14443A REQA.\r\n"
 		print self.f.readline().strip()
+		# Do all of these have a response?  Skip for now
 
 	def WUPB(self, WUPB_arg):
 		'''Wakeup B?'''
@@ -607,6 +608,58 @@ class RFID:
 		self.send_simple_hex('FF')
 		return self.f.readline().strip()
 
+	'''
+	Composite commands
+	'''
+	
+	def set_14443A_half_power(self):
+		'''
+		0031
+			write reg
+			reg: 00
+				chip status control
+			value: 31
+				20: RF output active
+				10: half output power
+				1: 5 V operation
+		0109
+			write reg
+			reg: 01
+				IS control
+			value: 09
+				RFID mode = ISO14443A high bit rate 212 kbps
+		'''
+		self.reg_write_single([(0x00, 0x31), (0x01, 0x09)])
+
+	def set_14443A_full_power(self):
+		'''
+		0021
+			write reg
+			reg: 00
+				chip status control
+			value: 21
+				20: RF output active
+				1: 5 V operation
+		0109
+			write reg
+			reg: 01
+				IS control
+			value: 09
+				RFID mode = ISO14443A high bit rate 212 kbps
+		'''
+		self.reg_write_single([(0x00, 0x21), (0x01, 0x09)])
+
+	def anticollision(self):
+		self.REQA(0x01)
+		'''
+		No card
+			()
+		With card
+			(0123)(...
+			Long line
+		'''
+		return self.f.readline().strip()
+
 def help():
 	print 'uvrfid version %s' % VERSION
 	print 'Copyright 2011 John McMaster <JohnDMcMaster@gmail.com>'
@@ -651,7 +704,12 @@ if __name__ == "__main__":
 	print 'version: %s' % rfid.get_version()
 	print 'info: %s' % rfid.get_info()
 
+	rfid.set_14443A_full_power()
 	rfid.inventory(0xFF)
+	res = rfid.anticollision()
+	print res
+
+	
 	while True:
 		print rfid.f.readline().strip()
 	
