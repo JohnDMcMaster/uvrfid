@@ -19,7 +19,12 @@ The mystical flags variable
 import sys 
 import os.path
 import select
-import serial
+try:
+	import serial
+	using_pyserial = True
+except:
+	using_pyserial = False
+using_pyserial = True
 
 VERSION = '0.1'
 
@@ -89,27 +94,64 @@ class RFID:
 	device = "/dev/ttyUSB0"
 	# file
 	f = None
+	ser = None
 	
 	def __init__(self):
-		# set the termios, consider switching over to PySerial completly
-		#ser = serial.Serial(self.device, 115200, timeout=1)
-		#x = ser.read()          # read one byte
-		#s = ser.read(10)        # read up to ten bytes (timeout)
-		#line = ser.readline()   # read a '\n' terminated line
-		#ser.close()
-
-		self.f = open(self.device, "w+")
+		if using_pyserial:
+			# set the termios, consider switching over to PySerial completly
+			self.ser = serial.Serial(self.device, 115200, timeout=1)
+			#x = self.ser.read()          # read one byte
+			#s = self.ser.read(10)        # read up to ten bytes (timeout)
+		else:
+			self.f = open(self.device, "w+")
 		# Try to flush old garbage
 		#self.read_all()
 	
+	def __del__(self):
+		if using_pyserial:
+			self.ser.close()
+	
 	'''
-	Utility
+	Serial utility
+	'''
+	
+	def readline(self):
+		if using_pyserial:
+			return self.ser.readline()   # read a '\n' terminated line
+		else:
+			return self.f.readline()
+	
+	def ser_write(self, to_write):
+		if using_pyserial:
+			self.ser.write(to_write)
+		else:
+			self.f.write(to_write)
+	
+	def ser_flush(self):
+		if using_pyserial:
+			self.ser.flush()
+		else:
+			self.f.flush()
+	
+
+	def read_all(self):
+		ret = ''
+		while True:
+			# Data ready?
+			(rlist, wlist, xlist) = select.select([self.f], None, None, 0)
+			if len(rlist) == 0:
+				break
+			ret += self.f.read()
+		return ret
+
+	'''
+	Board utility
 	'''
 	
 	'''
 	Code seems to indicate second byte should be 0x08 when not checked (size of 0)
 	'''
-	
+
 	def send(self, s):
 		return self.send_hex(to_hex(s))
 		
@@ -140,10 +182,10 @@ class RFID:
 		
 		to_write = '01%s\r\n' % s
 		print 'to board: %s' % to_write.strip()
-		self.f.write(to_write)
-		self.f.flush()
+		self.ser_write(to_write)
+		self.ser_flush()
 		# Eat the response
-		echoed = self.f.readline()
+		echoed = self.readline()
 
 		# Mayhe should eat until its correct?
 		# need to figure out how to poll though or might freeze up
@@ -187,21 +229,11 @@ class RFID:
 		'''
 		Should be of form "[012345]\r\n"
 		'''
-		line = f.readline().strip()
+		line = self.readline().strip()
 		if len(line) < 2 or (not line[0] == '[') or (not line[-1] == ']'):
 			raise Exception("malformed response")
 		
-		line = line[1:-1]
-		
-	def read_all(self):
-		ret = ''
-		while True:
-			# Data ready?
-			(rlist, wlist, xlist) = select.select([self.f], None, None, 0)
-			if len(rlist) == 0:
-				break
-			ret += self.f.read()
-		return ret
+		line = line[1:-1]		
 		
 	'''
 	Commands
@@ -266,7 +298,7 @@ class RFID:
 		# two bytes per register + magic
 		self.send_parts(chr(len(data) + 8), '\x10', data)
 		# "Register write request."
-		print self.f.readline().strip()
+		print self.readline().strip()
 
 	def reg_write_continuous(self, base_address, bytes):
 		'''Write to a series of registers given base and incrementing, input as bytes'''
@@ -287,7 +319,7 @@ class RFID:
 		# one byte + register + base + magic
 		self.send_parts(ord(len(data) + 1 + 8), '\x11', data)
 		# "Continous write request."
-		return self.f.readline().strip()
+		return self.readline().strip()
 		
 	def reg_read(self, address):
 		'''Read from one and only one register, input as bytes'''
@@ -311,7 +343,7 @@ class RFID:
 		# one bytes per register + magic
 		self.send_parts(ord(len(targets) + 8), '\x12', data)
 		# "Register read request.\r\n"
-		print self.f.readline().strip()
+		print self.readline().strip()
 		return self.read_response_bytes()
 
 	def reg_read_continuous(self, base_address, count):
@@ -330,7 +362,7 @@ class RFID:
 		data += '%c' % count
 		self.send_parts('', '\x13', data)
 		# ""Continous read request\r\n""
-		print self.f.readline().strip()
+		print self.readline().strip()
 		return self.read_response_bytes()
 
 	def inventory(self, flags):
@@ -340,7 +372,7 @@ class RFID:
 		'''
 		self.send_parts('', '\x14', chr(flags))
 		# "ISO 15693 Inventory request.\r\n"
-		print self.f.readline().strip()
+		print self.readline().strip()
 
 	def write_raw(self, byte):
 		'''Raw SPI/parallel line write (single byte as str)'''
@@ -354,7 +386,7 @@ class RFID:
 		# Length is inferred
 		self.send_parts('', '\x15', byte)
 		# "RAW mode.\r\n"
-		return self.f.readline().strip()
+		return self.readline().strip()
 
 	def write_raw(self, bytes):
 		'''Raw SPI/parallel line write (multi byte as str)'''
@@ -369,7 +401,7 @@ class RFID:
 		# length + magic (no register)
 		self.send_parts(ord(len(bytes) + 8), '\x16', bytes)
 		# "RAW mode.\r\n"
-		return self.f.readline().strip()
+		return self.readline().strip()
 
 	def request_mode(self, bytes):
 		'''?'''
@@ -385,7 +417,7 @@ class RFID:
 		# length + magic (no register)
 		self.send_parts(ord(len(bytes) + 8), '\x18', bytes)
 		# "Request mode.\r\n"
-		return self.f.readline().strip()
+		return self.readline().strip()
 
 	def change_bit_rate_core(self, bit_rate):
 		'''change bit rate'''
@@ -401,7 +433,7 @@ class RFID:
 		# length + magic (why 9 on this one?)
 		self.send_parts(ord(len(bytes) + 9), '\x19', bit_rate)
 		# "14443A Request - change bit rate.\r\n"
-		return self.f.readline().strip()
+		return self.readline().strip()
 
 	def TI_SID_poll(self, flags):
 		'''Poll the SID (TI)'''
@@ -416,7 +448,7 @@ class RFID:
 		# length + magic
 		self.send_parts(ord(len(bytes) + 9), '\x34', flags)
 		# "Ti SID Poll.\r\n"
-		print self.f.readline().strip()
+		print self.readline().strip()
 		# At least sometimes returns something
 		return self.read_response_bytes()
 
@@ -430,7 +462,7 @@ class RFID:
 		# length + magic
 		self.send_simple_hex('\x0F')
 		# "Direct mode.\r\n"
-		print self.f.readline().strip()
+		print self.readline().strip()
 
 	def REQB(self, slots):
 		'''Request A?'''
@@ -446,7 +478,7 @@ class RFID:
 		# length + magic
 		self.send_parts('', '\xB0', slots)
 		# "14443B REQB.\r\n"
-		print self.f.readline().strip()
+		print self.readline().strip()
 
 	def WUPB(self, slots):
 		'''Wakeup B?'''
@@ -462,7 +494,7 @@ class RFID:
 		# length + magic
 		self.send_parts('', '\xB1', slots)
 		# "14443B REQB.\r\n"
-		print self.f.readline().strip()
+		print self.readline().strip()
 
 	def REQA(self, REQA_arg):
 		'''Request A?'''
@@ -477,7 +509,7 @@ class RFID:
 		# length + magic
 		self.send_parts('', '\xA0', chr(REQA_arg))
 		# "14443A REQA.\r\n"
-		print self.f.readline().strip()
+		print self.readline().strip()
 		# Do all of these have a response?  Skip for now
 
 	def WUPB(self, WUPB_arg):
@@ -493,7 +525,7 @@ class RFID:
 		# length + magic
 		self.send_parts('', '\xA1', WUPB_arg)
 		# "14443A REQA.\r\n"
-		print self.f.readline().strip()
+		print self.readline().strip()
 
 	def disable_reader(self):
 		# commented out for some reason in firmware source code
@@ -599,14 +631,14 @@ class RFID:
 		Also it echos back, so we need to discard the echo (or verify...)
 		'''
 		self.send_simple_hex('FE')
-		return self.f.readline().strip()
+		return self.readline().strip()
 
 	def get_info(self):
 		'''
 		phello = "TRF7960 EVM \r\n";
 		'''
 		self.send_simple_hex('FF')
-		return self.f.readline().strip()
+		return self.readline().strip()
 
 	'''
 	Composite commands
@@ -658,7 +690,9 @@ class RFID:
 			(0123)(...
 			Long line
 		'''
-		return self.f.readline().strip()
+		res = self.readline().strip()
+		# (mfg id?, 4 hex chars)(timestamp?, 10 hex chars)(24)(? 10 chars, varies card to card)[a UID, 18 chars]
+		return res
 
 def help():
 	print 'uvrfid version %s' % VERSION
@@ -705,13 +739,18 @@ if __name__ == "__main__":
 	print 'info: %s' % rfid.get_info()
 
 	rfid.set_14443A_full_power()
-	rfid.inventory(0xFF)
-	res = rfid.anticollision()
-	print res
-
-	
+	#rfid.inventory(0xFF)
+	# Every other anticollision listing is blank...why?
 	while True:
-		print rfid.f.readline().strip()
+		res = rfid.anticollision()
+		print res
+
+	while False:
+		res = rfid.readline().strip()
+		if len(res) == 0:
+			print '<no data>'
+		else:
+			print res
 	
 	print 'Done!'
 
